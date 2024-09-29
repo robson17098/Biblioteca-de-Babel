@@ -1,66 +1,27 @@
-import numpy as np
-from transformers import Trainer, TrainingArguments, AutoTokenizer, AutoModelForQuestionAnswering
-from datasets import load_dataset
+# Chatbot básico em Python
 
-# Carregar o dataset
-dataset = load_dataset("squad")
+# Dicionário com algumas respostas
+respostas = {
+    "olá": "Olá! Como posso ajudá-lo hoje?",
+    "como você está?": "Estou apenas um programa de computador, mas estou aqui para ajudar!",
+    "qual é o seu nome?": "Eu sou um chatbot simples criado em Python.",
+    "o que você pode fazer?": "Posso responder a perguntas básicas e ajudar com informações.",
+    "tchau": "Até logo! Tenha um bom dia!"
+}
 
-# Carregar o tokenizer e o modelo
-tokenizer = AutoTokenizer.from_pretrained("distilbert-base-uncased")
-model = AutoModelForQuestionAnswering.from_pretrained("distilbert-base-uncased")
-
-# Função de pré-processamento
-def preprocess_function(examples):
-    # Tokeniza as perguntas e os contextos
-    tokenized_examples = tokenizer(
-        examples["question"], 
-        examples["context"], 
-        truncation=True,
-        padding="max_length",
-        max_length=512,  # Ajuste conforme necessário
-        return_tensors='pt'
-    )
+# Função principal do chatbot
+def chatbot():
+    print("Bem-vindo ao Chatbot! (Digite 'tchau' para encerrar)")
     
-    # Adiciona as posições de início e fim
-    start_positions = []
-    end_positions = []
+    while True:
+        usuario_input = input("Você: ").lower()  # Lê a entrada do usuário
+        if usuario_input in respostas:
+            print("Chatbot:", respostas[usuario_input])  # Responde de acordo com o dicionário
+        elif usuario_input == 'tchau':
+            print("Chatbot: Até logo! Tenha um bom dia!")
+            break  # Encerra o loop se o usuário digitar 'tchau'
+        else:
+            print("Chatbot: Desculpe, não entendi. Você pode reformular a pergunta.")
 
-    for i in range(len(examples['answers'])):
-        # Obtemos a resposta correta e sua posição
-        answer = examples['answers'][i]
-        start = answer['answer_start'][0]  # Primeiro índice do início da resposta
-        end = start + len(answer['text'][0])  # Calcula a posição final da resposta
-        
-        start_positions.append(start)
-        end_positions.append(end)
-    
-    tokenized_examples["start_positions"] = np.array(start_positions)
-    tokenized_examples["end_positions"] = np.array(end_positions)
-
-    return tokenized_examples
-
-# Pré-processar os dados
-tokenized_dataset = dataset.map(preprocess_function, batched=True)
-
-# Definir os argumentos de treinamento
-training_args = TrainingArguments(
-    output_dir="./results",             # Onde os resultados serão salvos
-    evaluation_strategy="epoch",        # Avaliar a cada época
-    learning_rate=2e-5,                 # Taxa de aprendizado
-    per_device_train_batch_size=16,     # Tamanho do lote de treinamento
-    per_device_eval_batch_size=16,      # Tamanho do lote de avaliação
-    num_train_epochs=3,                  # Número de épocas
-    weight_decay=0.01,                  # Decaimento de peso
-    logging_dir='./logs',                # Diretório para logs
-)
-
-# Inicializar o Trainer
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=tokenized_dataset["train"],
-    eval_dataset=tokenized_dataset["validation"],
-)
-
-# Treinar o modelo
-trainer.train()
+# Chama a função do chatbot
+chatbot()
