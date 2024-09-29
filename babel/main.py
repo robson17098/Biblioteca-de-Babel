@@ -107,7 +107,7 @@ class BabelGUI:
         master.title("Gerador de Histórias")
         master.geometry('500x400')
 
-        self.library = MarkovModel('frases3m.txt')
+        self.library = MarkovModel('frases198k.txt')
         self.loading_thread = threading.Thread(target=self.library.load_phrases)
         self.loading_thread.start()
 
