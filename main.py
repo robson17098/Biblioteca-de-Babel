@@ -1,160 +1,126 @@
+import sys
 import random
 import string
-import numpy as np
-import tkinter as tk
-from tkinter import scrolledtext, ttk
-from concurrent.futures import ThreadPoolExecutor
-import threading
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel, QLineEdit, QPushButton, QTextEdit, QVBoxLayout, QProgressBar, QMessageBox
+from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
 
-# Definindo a quantidade máxima de livros para busca
-MAX_LIVROS = 100000  # Número teórico de livros a serem explorados na busca
-NUM_THREADS = 4  # Número de threads para paralelismo
+def gerar_palavras(num_palavras: int):
+    """
+    Gera uma lista de palavras aleatórias utilizando um modelo de Markov.
+    """
+    palavras = []
+    for _ in range(num_palavras):
+        tamanho = random.randint(3, 8)  # Palavras com comprimento entre 3 e 8
+        palavra = ''.join(random.choices(string.ascii_lowercase, k=tamanho))
+        palavras.append(palavra)
+    return palavras
 
-# Funções de geração de textos usando NumPy
-def gerar_pagina_numpy(num_caracteres=1000):
-    """Gera uma página com caracteres aleatórios usando NumPy"""
-    caracteres = np.array(list(string.ascii_letters + string.digits + string.punctuation + " "))
-    pagina = ''.join(np.random.choice(caracteres, num_caracteres))
-    return pagina
+class Livro:
+    def __init__(self, id: int, num_paginas: int):
+        self.id = id
+        self.paginas = self.gerar_paginas(num_paginas)
 
-def gerar_livro_numpy(num_paginas=10, num_caracteres_por_pagina=1000):
-    """Gera um livro com múltiplas páginas usando NumPy"""
-    return [gerar_pagina_numpy(num_caracteres_por_pagina) for _ in range(num_paginas)]
+    def gerar_paginas(self, num_paginas: int):
+        palavras = gerar_palavras(num_paginas * 500)  # Gera todas as palavras de uma vez
+        return [self.gerar_pagina(i + 1, palavras) for i in range(num_paginas)]
 
-# Classe para a Biblioteca de Babel infinita
-class BibliotecaBabel:
-    def __init__(self):
-        """Inicializa uma biblioteca infinita"""
-        self.cache = {}
+    def gerar_pagina(self, numero: int, palavras):
+        start_index = (numero - 1) * 500
+        end_index = numero * 500
+        return f"Página {numero}:\n" + ' '.join(palavras[start_index:end_index])
 
-    def acessar_livro(self, corredor, prateleira):
-        """Gera ou acessa um livro específico da biblioteca"""
-        chave = (corredor, prateleira)
-        if chave not in self.cache:
-            # Se o livro ainda não foi gerado, cria e armazena no cache
-            self.cache[chave] = gerar_livro_numpy()
-        return self.cache[chave]
+class Biblioteca:
+    def __init__(self, num_paginas_por_livro: int):
+        self.num_paginas_por_livro = num_paginas_por_livro
+        self.livros = []
 
-# Classe para a navegação na Biblioteca
-class NavegacaoBiblioteca:
-    def __init__(self, biblioteca):
-        self.biblioteca = biblioteca
-        self.lock = threading.Lock()  # Para garantir que as threads não acessem simultaneamente o cache
+    def gerar_livro(self, id: int):
+        livro = Livro(id, self.num_paginas_por_livro)
+        self.livros.append(livro)
+        return livro
 
-    def acessar_livro(self, corredor, prateleira):
-        """Acessa um livro por corredor e prateleira"""
-        with self.lock:
-            livro = self.biblioteca.acessar_livro(corredor, prateleira)
-            return livro
-
-    def buscar_palavra_em_subdivisao(self, termo, corredor_start, corredor_end, prateleira_start, prateleira_end, callback_atualizar_progresso, total_livros, resultados):
-        """Busca em uma subdivisão específica da biblioteca"""
-        total_livros_verificados = 0
-
-        for corredor in range(corredor_start, corredor_end):
-            for prateleira in range(prateleira_start, prateleira_end):
-                livro = self.acessar_livro(corredor, prateleira)
-                for i, pagina in enumerate(livro):
-                    if termo in pagina:
-                        with self.lock:
-                            resultados.append((corredor, prateleira, i, pagina))
-                        return
-                # Atualiza a barra de progresso a cada livro verificado
-                total_livros_verificados += 1
-                progresso = (total_livros_verificados / total_livros) * 100
-                callback_atualizar_progresso(progresso)
-
-    def buscar_palavra_global(self, termo, callback_atualizar_progresso):
-        """Divide a busca global em threads e usa processamento em quadrantes"""
-        total_livros = MAX_LIVROS
-        num_corredores = total_livros // 10
-
-        # Dividindo a busca em quadrantes lógicos
-        subdivisoes = [
-            (0, num_corredores // 2, 0, 5),  # Primeiro quadrante
-            (0, num_corredores // 2, 5, 10),  # Segundo quadrante
-            (num_corredores // 2, num_corredores, 0, 5),  # Terceiro quadrante
-            (num_corredores // 2, num_corredores, 5, 10),  # Quarto quadrante
-        ]
-
+    def pesquisar_palavra(self, palavra: str):
         resultados = []
+        for livro in self.livros:
+            for pagina in livro.paginas:
+                if palavra in pagina:
+                    resultados.append((livro.id, pagina))
+        return resultados
 
-        with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-            futuros = []
-            for subdivisao in subdivisoes:
-                corredor_start, corredor_end, prateleira_start, prateleira_end = subdivisao
-                futuros.append(executor.submit(self.buscar_palavra_em_subdivisao, termo, corredor_start, corredor_end, prateleira_start, prateleira_end, callback_atualizar_progresso, total_livros, resultados))
+class Worker(QThread):
+    progress_changed = pyqtSignal(int)
+    text_updated = pyqtSignal(str)
 
-            for futuro in futuros:
-                futuro.result()
+    def __init__(self, biblioteca, palavra):
+        super().__init__()
+        self.biblioteca = biblioteca
+        self.palavra = palavra
 
-        if resultados:
-            return resultados[0]  # Retorna o primeiro resultado encontrado
-        else:
-            return None  # Não encontrado
+    def run(self):
+        for i in range(60):
+            livro = self.biblioteca.gerar_livro(i)
+            self.progress_changed.emit(int((i + 1) * 100 / 60))
 
-# Interface Gráfica usando Tkinter
-class InterfaceBiblioteca:
-    def __init__(self, raiz, navegacao):
-        self.navegacao = navegacao
-        self.raiz = raiz
-        self.raiz.title("Biblioteca de Babel")
+            if i % 5 == 0:
+                self.text_updated.emit(f'\nCriando livro {livro.id}...\n')
+                random_palavras = gerar_palavras(10)  # Gera 10 palavras aleatórias
+                self.text_updated.emit("Palavras geradas: " + ', '.join(random_palavras) + "\n")
 
-        # Labels
-        self.label_busca = tk.Label(raiz, text="Buscar Termo:")
-        self.label_busca.grid(row=0, column=0)
+            resultados = self.biblioteca.pesquisar_palavra(self.palavra)
+            if resultados:
+                for id_livro, pagina in resultados:
+                    self.text_updated.emit(f"Palavra '{self.palavra}' encontrada no Livro {id_livro}:\n{pagina}\n\n")
+                return
 
-        # Campo de entrada para o termo de busca
-        self.busca_input = tk.Entry(raiz)
-        self.busca_input.grid(row=0, column=1)
+        self.text_updated.emit(f"A palavra '{self.palavra}' não foi encontrada em nenhum livro.\n")
 
-        # Botão de busca global
-        self.botao_buscar = tk.Button(raiz, text="Buscar Globalmente", command=self.iniciar_busca_em_thread)
-        self.botao_buscar.grid(row=1, column=0, columnspan=2)
+class BibliotecaApp(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.biblioteca = Biblioteca(num_paginas_por_livro=5000)
+        self.init_ui()
 
-        # Barra de progresso
-        self.progresso = ttk.Progressbar(raiz, orient="horizontal", length=400, mode="determinate")
-        self.progresso.grid(row=2, column=0, columnspan=2)
-        
-        # Texto para exibir o progresso em porcentagem
-        self.label_progresso = tk.Label(raiz, text="Progresso: 0%")
-        self.label_progresso.grid(row=3, column=0, columnspan=2)
+    def init_ui(self):
+        self.setWindowTitle('Biblioteca de Babel Infinita')
 
-        # Área de texto para exibir o resultado
-        self.resultado_texto = scrolledtext.ScrolledText(raiz, width=60, height=20)
-        self.resultado_texto.grid(row=4, column=0, columnspan=2)
+        self.layout = QVBoxLayout()
 
-    def atualizar_progresso(self, progresso):
-        """Atualiza a barra de progresso e a label de porcentagem"""
-        self.progresso['value'] = progresso
-        self.label_progresso.config(text=f"Progresso: {progresso:.2f}%")
-        self.raiz.update_idletasks()
+        self.label = QLabel('Pesquise por uma palavra:')
+        self.layout.addWidget(self.label)
 
-    def buscar_termo_global(self):
-        """Realiza a busca global de um termo e mostra os resultados"""
-        termo = self.busca_input.get()
-        self.resultado_texto.delete(1.0, tk.END)  # Limpa o campo de texto
+        self.entry = QLineEdit(self)
+        self.layout.addWidget(self.entry)
 
-        resultado = self.navegacao.buscar_palavra_global(termo, self.atualizar_progresso)
+        self.search_button = QPushButton('Pesquisar', self)
+        self.search_button.clicked.connect(self.pesquisar)
+        self.layout.addWidget(self.search_button)
 
-        if resultado:
-            corredor, prateleira, pagina_num, pagina = resultado
-            self.resultado_texto.insert(tk.END, f"Termo '{termo}' encontrado:\n")
-            self.resultado_texto.insert(tk.END, f"Corredor: {corredor}, Prateleira: {prateleira}, Página: {pagina_num + 1}\n")
-            self.resultado_texto.insert(tk.END, f"Conteúdo da Página:\n{pagina}\n")
-        else:
-            self.resultado_texto.insert(tk.END, f"Termo '{termo}' não encontrado em {MAX_LIVROS} livros.")
+        self.progress = QProgressBar(self)
+        self.progress.setAlignment(Qt.AlignCenter)
+        self.layout.addWidget(self.progress)
 
-    def iniciar_busca_em_thread(self):
-        """Inicia a busca em uma thread separada para não travar a interface"""
-        thread_busca = threading.Thread(target=self.buscar_termo_global)
-        thread_busca.start()
+        self.text_area = QTextEdit(self)
+        self.text_area.setReadOnly(True)
+        self.layout.addWidget(self.text_area)
 
-# Inicializando a biblioteca infinita
-biblioteca = BibliotecaBabel()
-navegacao = NavegacaoBiblioteca(biblioteca)
+        self.setLayout(self.layout)
 
-# Inicializando a interface gráfica
-raiz = tk.Tk()
-app = InterfaceBiblioteca(raiz, navegacao)
-raiz.mainloop()
+    def pesquisar(self):
+        palavra = self.entry.text().strip()
+        if not palavra:
+            QMessageBox.warning(self, 'Aviso', 'Por favor, insira uma palavra para pesquisar.')
+            return
+
+        self.text_area.clear()
+        self.progress.setValue(0)
+
+        self.worker = Worker(self.biblioteca, palavra)
+        self.worker.progress_changed.connect(self.progress.setValue)
+        self.worker.text_updated.connect(self.text_area.append)
+        self.worker.start()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = BibliotecaApp()
+    window.show()
+    sys.exit(app.exec_())
